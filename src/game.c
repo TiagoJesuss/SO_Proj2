@@ -104,6 +104,7 @@ void *pacman_thread(void *arg) {
             pthread_rwlock_unlock(lock);
             break;
         }
+        /*
         if (play->command == 'G'){
             pthread_rwlock_wrlock(lock);
             *result = CREATE_BACKUP;
@@ -112,6 +113,7 @@ void *pacman_thread(void *arg) {
             pthread_rwlock_unlock(lock);
             break;
         }
+        */
 
         int move = move_pacman(game_board, 0, play);
 
@@ -125,7 +127,7 @@ void *pacman_thread(void *arg) {
 
         if (move == DEAD_PACMAN) {
             pthread_rwlock_wrlock(lock);
-            *result = LOAD_BACKUP;
+            *result = QUIT_GAME;
             *leave_thread = true;
             pthread_rwlock_unlock(lock);
             break; // Pacman morreu
@@ -135,7 +137,7 @@ void *pacman_thread(void *arg) {
     }
     if (!pacman->alive) {
         pthread_rwlock_wrlock(lock);
-        *result = LOAD_BACKUP;
+        *result = QUIT_GAME;
         *leave_thread = true;
         pthread_rwlock_unlock(lock);
     }
@@ -402,7 +404,7 @@ int main(int argc, char** argv) {
     bool end_game = false;
     board_t game_board = {0};
     int lvl = 0;
-    bool hasBackup = false;
+    //bool hasBackup = false;
     int result;
     bool leave_thread = false;
 
@@ -451,58 +453,17 @@ int main(int argc, char** argv) {
                 if (lvl >= n_levels) {
                     screen_refresh(&game_board, DRAW_WIN);
                     end_game = true;
-                    if (hasBackup){
-                        _exit(2);
-                    }
                 } else {
                     screen_refresh(&game_board, DRAW_MENU);
                 }
                 sleep_ms(game_board.tempo);
                 break;
             }
-            if(result == QUIT_GAME && hasBackup) {
-                screen_refresh(&game_board, DRAW_GAME_OVER);
-                _exit(1);
-            }
             if(result == QUIT_GAME) {
                 screen_refresh(&game_board, DRAW_GAME_OVER); 
                 sleep_ms(game_board.tempo);
                 end_game = true;
                 break;
-            }
-            if (result == LOAD_BACKUP && !hasBackup){
-                screen_refresh(&game_board, DRAW_GAME_OVER); 
-                sleep_ms(game_board.tempo);
-                end_game = true;
-                break;
-            } else if (result == LOAD_BACKUP){
-                _exit(0);
-            }
-
-            if (result == CREATE_BACKUP && !hasBackup){
-                pid_t pid, w;
-                int status;
-                hasBackup = true;
-                pid = fork(); 
-                if (pid==-1){
-                    perror("fork");
-                    exit(EXIT_FAILURE);
-                }
-                if (pid!= 0 && pid != -1){ // caso do pai
-                    w = waitpid(pid, &status, 0); // 0 representa esperar por todas as childs, pode ser mudado visto q so ha uma
-                    if (w == -1) {
-                        perror("waitpid");
-                        exit(EXIT_FAILURE);
-                    }
-                    hasBackup = false;
-                    if (WIFEXITED(status)){ //se child terminar de forma correta(return true)
-                        if (WEXITSTATUS(status) != 0){ //neste caso exit = 1 entra ca dentro
-                            sleep_ms(game_board.tempo);
-                            end_game = true;
-                            break;
-                        } 
-                    }
-                }
             }
     
             screen_refresh(&game_board, DRAW_MENU); 
