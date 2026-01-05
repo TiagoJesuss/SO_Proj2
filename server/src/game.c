@@ -8,8 +8,10 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/types.h> 
+#include <sys/stat.h>
 #include <sys/wait.h>   
 #include <pthread.h>
+#include <signal.h>
 
 #define CONTINUE_PLAY 0
 #define NEXT_LEVEL 1
@@ -386,12 +388,15 @@ void ghost_thread_args_init(ghost_thread_args_t *args, board_t *game_board, int 
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        printf("Usage: %s <level_directory>\n", argv[0]);
+    if (argc != 4) {
+        printf("Usage: %s <level_directory> <max_games> <register_fifo_path>\n", argv[0]);
+        return EXIT_FAILURE;
     }
     open_debug_file("debug.log");
     level_info level_info[MAX_LEVELS];
     int n_levels = read_dir(argv[1], level_info);
+    int max_games = atoi(argv[2]);
+    char *register_fifo_path = argv[3];
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
 
