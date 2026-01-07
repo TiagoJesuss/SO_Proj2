@@ -457,7 +457,7 @@ int main(int argc, char** argv) {
     open_debug_file("debug.log");
     level_info level_info[MAX_LEVELS];
     int n_levels = read_dir(argv[1], level_info);
-    int max_games = atoi(argv[2]);
+    //int max_games = atoi(argv[2]);
     char *register_fifo_path = argv[3];
     // Random seed for any random movements
     srand((unsigned int)time(NULL));

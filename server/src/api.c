@@ -1,4 +1,5 @@
 #include "api.h"
+#include "board.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -57,30 +58,30 @@ int read_connect_request(int req_fd, connect_request_t *request) {
 }
 
 int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, int *rep_fd, int *notif_fd) {
-    int notif_fd = open(notif_pipe_path, O_WRONLY);
-    if (notif_fd < 0) {
+    int n_fd = open(notif_pipe_path, O_WRONLY);
+    if (n_fd < 0) {
         debug("Error opening notification pipe: %s\n", strerror(errno));
         return -1;
     }
 
-    int req_fd = open(rep_pipe_path, O_RDONLY | O_NONBLOCK);
-    if (req_fd < 0) {
+    int r_fd = open(rep_pipe_path, O_RDONLY | O_NONBLOCK);
+    if (r_fd < 0) {
         debug("Error opening reply pipe: %s\n", strerror(errno));
-        close(notif_fd);
+        close(n_fd);
         return -1;
     }
 
     int response[2] = {OP_CODE_CONNECT, 0};
-    ssize_t bytes_written = write(notif_fd, response, sizeof(response));
+    ssize_t bytes_written = write(n_fd, response, sizeof(response));
     if (bytes_written != sizeof(response)) {
         debug("Error writing to notification pipe: %s\n", strerror(errno));
-        close(notif_fd);
-        close(req_fd);
+        close(n_fd);
+        close(r_fd);
         return -1;
     }
 
-    *rep_fd = req_fd;
-    *notif_fd = notif_fd;
+    *rep_fd = r_fd;
+    *notif_fd = n_fd;
     
     return 0;
 }
@@ -88,16 +89,20 @@ int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, in
 char get_input_non_blocking(int req_pipe_fd) {
     char buffer[3];
     ssize_t bytes_read = read(req_pipe_fd, buffer, sizeof(buffer));
-    if (bytes_read <= 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return '\0'; // No input available
-        } else if (atoi(buffer[0]) != OP_CODE_PLAY) {
+    if (bytes_read > 0) {
+        if (buffer[0] != OP_CODE_PLAY) {
             debug("Invalid operation code: %d\n", buffer[0]);
             return '\0';
-        } else {
-            debug("Error reading from reply pipe: %s\n", strerror(errno));
-            return '\0';
         }
+        return buffer[1];
     }
-    return buffer[1];
+    
+    if (bytes_read < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        return '\0'; // No input available
+    }
+
+    if (bytes_read < 0) {
+        debug("Error reading from reply pipe: %s\n", strerror(errno));
+    }
+    return '\0';
 }
