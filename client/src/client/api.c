@@ -24,6 +24,7 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   // TODO - implement me
   strcpy(session.req_pipe_path, req_pipe_path);
   strcpy(session.notif_pipe_path, notif_pipe_path);
+  
 
   int serverFd = open(server_pipe_path, O_WRONLY);
   char op = OP_CODE_CONNECT;
@@ -51,6 +52,8 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
 void pacman_play(char command) {
   char op =  OP_CODE_PLAY;
   write(session.req_pipe, &op, 1);
+  write(session.req_pipe, &command, sizeof(char));
+  return 0;
   // TODO - implement me
 }
 
@@ -60,12 +63,25 @@ int pacman_disconnect() {
   write(session.req_pipe, &op, 1);
   close(session.req_pipe);
   close(session.notif_pipe);
-  unlink(session.req_pipe);
-  unlink(session.notif_pipe);
+  //unlink(session.req_pipe);
+  //unlink(session.notif_pipe);
 
-  return 0;
 }
 
 Board receive_board_update(void) {
     // TODO - implement me
+  Board cityBoard;
+  char op;
+  read(session.notif_pipe, &op, 1);
+  read(session.notif_pipe, &cityBoard.width, sizeof(int));
+  read(session.notif_pipe, &cityBoard.height, sizeof(int));
+  read(session.notif_pipe, &cityBoard.tempo, sizeof(int));  
+  read(session.notif_pipe, &cityBoard.victory, sizeof(int));
+  read(session.notif_pipe, &cityBoard.game_over, sizeof(int));
+  read(session.notif_pipe, &cityBoard.accumulated_points, sizeof(int));
+  cityBoard.data = (char*)malloc(sizeof(char)*(cityBoard.height*cityBoard.width));
+  read(session.notif_pipe, cityBoard.data, cityBoard.height*cityBoard.width);
+  //nao esquecer dar free ao data
+  return cityBoard;
+  
 }

@@ -37,8 +37,9 @@ static void *receiver_thread(void *arg) {
 
         draw_board_client(board);
         refresh_screen();
+        free(board.data);
     }
-
+    
     debug("Returning receiver thread...\n");
     return NULL;
 }
@@ -74,6 +75,9 @@ int main(int argc, char *argv[]) {
              "/tmp/%s_notification", client_id);
 
     open_debug_file("client-debug.log");
+
+    mkfifo(&req_pipe_path, 0777);
+    mkfifo(&notif_pipe_path, 0777);
 
     if (pacman_connect(req_pipe_path, notif_pipe_path, register_pipe) != 0) {
         perror("Failed to connect to server");
