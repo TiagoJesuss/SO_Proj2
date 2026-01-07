@@ -1,6 +1,7 @@
 #include "board.h"
 #include "display.h"
 #include "threads.h"
+#include "api.h"
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -106,16 +107,6 @@ void *pacman_thread(void *arg) {
             pthread_rwlock_unlock(lock);
             break;
         }
-        /*
-        if (play->command == 'G'){
-            pthread_rwlock_wrlock(lock);
-            *result = CREATE_BACKUP;
-            *leave_thread = true;
-            pacman->current_move++;
-            pthread_rwlock_unlock(lock);
-            break;
-        }
-        */
 
         int move = move_pacman(game_board, 0, play);
 
@@ -400,16 +391,32 @@ int main(int argc, char** argv) {
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
 
-    terminal_init();
+    //terminal_init(); -> ncurses vai ser do lado do cliente
     pthread_rwlock_t l = PTHREAD_RWLOCK_INITIALIZER;
     pthread_rwlock_t ncurses_lock = PTHREAD_RWLOCK_INITIALIZER;
 
+    int reg_pipe_fd = create_and_open_reg_fifo(register_fifo_path);
+    if (reg_pipe_fd < 0) {
+        close_debug_file();
+        return EXIT_FAILURE;
+    }
+
+    int client_req_fd = -1; 
+    int client_notif_fd = -1;
+    connect_request_t request;
+    while (client_req_fd < 0 || client_notif_fd < 0) {
+        if (read_connect_request(reg_pipe_fd, &request) < 0) {
+            close(reg_pipe_fd);
+        }
+        if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd) < 0) {
+            continue;
+        }
+    }
     
     int accumulated_points = 0;
     bool end_game = false;
     board_t game_board = {0};
     int lvl = 0;
-    //bool hasBackup = false;
     int result;
     bool leave_thread = false;
 
@@ -425,13 +432,16 @@ int main(int argc, char** argv) {
 
     ghost_thread_args_t ghost_args[MAX_GHOSTS];
     pthread_t ghost_tids[MAX_GHOSTS];
+
+
+
     while (!end_game) {
         load_level(&game_board, accumulated_points, &level_info[lvl]);
         for (int i = 0; i < game_board.n_ghosts; i++) {
             ghost_thread_args_init(&ghost_args[i], &game_board, i, &leave_thread);
         }
-        draw_board(&game_board, DRAW_MENU);
-        refresh_screen();
+        //draw_board(&game_board, DRAW_MENU); -> vai ser feito do lado do cliente
+        //refresh_screen(); -> vai ser feito do lado do cliente
         while(true) {
             if (pthread_create(&ncurses_tid, NULL, ncurses_thread, &ncurses_thread_args) != 0) {
                 perror("pthread_create");
@@ -482,6 +492,7 @@ int main(int argc, char** argv) {
     for (int i = lvl + 1; i < n_levels; i++) {
         free(level_info[i].board);
     }
+    close(reg_pipe_fd);
 
     terminal_cleanup();
 
