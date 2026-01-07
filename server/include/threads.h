@@ -3,6 +3,7 @@
 
 #include "board.h"
 #include <pthread.h>
+#include "api.h"
 
 typedef struct {
     char path[1024];
@@ -20,12 +21,21 @@ typedef struct {
     int *result;
     bool *leave_thread;
     pthread_rwlock_t *lock;
+    int req_pipe_fd;
 } pacman_thread_args_t;
 
 typedef struct {
     board_t *game_board;
     bool *leave_thread;
 } ncurses_thread_args_t;
+
+typedef struct {
+    board_t *game_board;
+    bool *leave_thread;
+    bool *victory;
+    int notif_fd;
+    bool game_over;
+} screen_thread_args_t;
 
 
 #endif

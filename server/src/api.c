@@ -84,3 +84,20 @@ int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, in
     
     return 0;
 }
+
+char get_input_non_blocking(int req_pipe_fd) {
+    char buffer[3];
+    ssize_t bytes_read = read(req_pipe_fd, buffer, sizeof(buffer));
+    if (bytes_read <= 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return '\0'; // No input available
+        } else if (atoi(buffer[0]) != OP_CODE_PLAY) {
+            debug("Invalid operation code: %d\n", buffer[0]);
+            return '\0';
+        } else {
+            debug("Error reading from reply pipe: %s\n", strerror(errno));
+            return '\0';
+        }
+    }
+    return buffer[1];
+}

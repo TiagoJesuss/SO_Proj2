@@ -13,8 +13,19 @@ typedef struct {
     char notif_pipe[MAX_PIPE_PATH_LENGTH];
 } connect_request_t;
 
+typedef struct {
+  int width;
+  int height;
+  int tempo;
+  int victory;
+  int game_over;
+  int accumulated_points;
+  char* data;
+} Board;
+
 int create_and_open_reg_fifo(const char *path);
 int read_connect_request(int req_fd, connect_request_t *request);
 int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, int *rep_fd, int *notif_fd);
+char get_input_non_blocking(int req_pipe_fd);
 
 #endif
