@@ -22,6 +22,9 @@ static struct Session session = {.id = -1};
 
 int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char const *server_pipe_path) {
   // TODO - implement me
+  
+  mkfifo(req_pipe_path, 0666);
+  mkfifo(notif_pipe_path, 0666);
   strcpy(session.req_pipe_path, req_pipe_path);
   strcpy(session.notif_pipe_path, notif_pipe_path);
   
@@ -53,7 +56,6 @@ void pacman_play(char command) {
   char op =  OP_CODE_PLAY;
   write(session.req_pipe, &op, 1);
   write(session.req_pipe, &command, sizeof(char));
-  return 0;
   // TODO - implement me
 }
 
@@ -65,7 +67,7 @@ int pacman_disconnect() {
   close(session.notif_pipe);
   //unlink(session.req_pipe);
   //unlink(session.notif_pipe);
-
+  return 0; 
 }
 
 Board receive_board_update(void) {

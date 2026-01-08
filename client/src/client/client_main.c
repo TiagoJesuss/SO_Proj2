@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <pthread.h>
 
+
 Board board;
 bool stop_execution = false;
 int tempo;
@@ -76,8 +77,6 @@ int main(int argc, char *argv[]) {
 
     open_debug_file("client-debug.log");
 
-    mkfifo(&req_pipe_path, 0777);
-    mkfifo(&notif_pipe_path, 0777);
 
     if (pacman_connect(req_pipe_path, notif_pipe_path, register_pipe) != 0) {
         perror("Failed to connect to server");
@@ -98,9 +97,10 @@ int main(int argc, char *argv[]) {
     while (1) {
 
         pthread_mutex_lock(&mutex);
-        if (stop_execution)
+        if (stop_execution){
             pthread_mutex_unlock(&mutex);
             break;
+        }
         pthread_mutex_unlock(&mutex);
 
         if (cmd_fp) {
@@ -115,9 +115,9 @@ int main(int argc, char *argv[]) {
 
             command = (char)ch;
 
-            if (command == '\n' || command == '\r' || command == '\0')
+            if (command == '\n' || command == '\r' || command == '\0'){
                 continue;
-
+            }
             command = toupper(command);
             
             // Wait for tempo, to not overflow pipe with requests
@@ -133,8 +133,9 @@ int main(int argc, char *argv[]) {
             command = toupper(command);
         }
 
-        if (command == '\0')
+        if (command == '\0'){
             continue;
+        }
 
         if (command == 'Q') {
             debug("Client pressed 'Q', quitting game\n");
@@ -151,9 +152,9 @@ int main(int argc, char *argv[]) {
 
     pthread_join(receiver_thread_id, NULL);
 
-    if (cmd_fp)
+    if (cmd_fp){
         fclose(cmd_fp);
-
+    }
     pthread_mutex_destroy(&mutex);
 
     terminal_cleanup();
