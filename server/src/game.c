@@ -505,6 +505,11 @@ void *worker_thread(void *arg) {
     return NULL;
 }
 
+typedef struct queue{
+    connect_request_t request;
+    struct queue *next;
+} Queue;
+
 int main(int argc, char** argv) {
     if (argc != 4) {
         printf("Usage: %s <level_directory> <max_games> <register_fifo_path>\n", argv[0]);
@@ -517,6 +522,7 @@ int main(int argc, char** argv) {
     char *register_fifo_path = argv[3];
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
+
 
     int reg_pipe_fd = create_and_open_reg_fifo(register_fifo_path);
     if (reg_pipe_fd < 0) {
@@ -532,16 +538,38 @@ int main(int argc, char** argv) {
         close(logFd);
     }
     */
+    connect_request_t request;
+    int client_req_fd[max_games] = {-1};
+    int client_notif_fd[max_games] = {-1};
+    
 
+    
     int clients = 0;
+    pthread_t worker_tid;
+    for (int i = 0; i<max_games; i++){
+        worker_thread_args_t worker_args;
+        worker_args.level_info = level_info;
+        worker_args.n_levels = n_levels;
+        worker_args.client_req_fd = &client_req_fd[i];
+        worker_args.client_notif_fd = &client_notif_fd[i];
+        worker_args.clients = &clients;
+        worker_args.client_id = i;
+        if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
+            perror("pthread_create");
+            continue;
+        }
+    }
+
+    Queue *head = (Queue*)malloc(sizeof(Queue));
+    
+
     while (1) {
             connect_request_t request;
-            int client_req_fd = -1;
-            int client_notif_fd = -1;
             if (read_connect_request(reg_pipe_fd, &request) < 0) {
                 debug("Error reading connect request\n");
                 continue;
             }
+            
             if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd, (max_games - clients)) < 0) {
                 debug("Error opening client pipes\n");
                 close(reg_pipe_fd);

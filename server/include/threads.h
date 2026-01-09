@@ -40,9 +40,10 @@ typedef struct {
 typedef struct {
     level_info *level_info;
     int n_levels;
-    int client_req_fd;
-    int client_notif_fd;
+    int *client_req_fd;
+    int *client_notif_fd;
     int *clients;
+    int client_id;
 } worker_thread_args_t;
 
 
