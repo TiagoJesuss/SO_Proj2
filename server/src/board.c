@@ -434,7 +434,14 @@ int load_level(board_t *board, int points, level_info *info) {
     board->ghosts = calloc(board->n_ghosts, sizeof(ghost_t));
 
     strcpy(board->level_name, info->file_name);
-    board->board = info->board;
+    // Allocate new memory for board to avoid modifying info->board
+    board->board = malloc(board->width * board->height * sizeof(board_pos_t));
+    if (!board->board) {
+        perror("Failed to allocate memory for board");
+        exit(EXIT_FAILURE);
+    }
+    // Copy content from info->board
+    memcpy(board->board, info->board, board->width * board->height * sizeof(board_pos_t));
 
     for (int i = 0; i < board->width * board->height; i++) {
         pthread_rwlock_init(&board->board[i].lock, NULL);
