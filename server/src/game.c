@@ -105,7 +105,7 @@ void *screen_thread(void *arg) {
     Board board_data = process_board_to_api(game_board, *victory, game_over);
 
     while (!*leave_thread) {
-        if (write(notif_fd, &board_data, sizeof(Board)) < 0) {
+        if (writeBoardChanges(notif_fd, board_data) < 0) {
             debug("Error writing to notification pipe: %s\n", strerror(errno));
             break;
         }

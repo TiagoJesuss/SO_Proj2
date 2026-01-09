@@ -22,13 +22,11 @@ static struct Session session = {.id = -1};
 
 int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char const *server_pipe_path) {
   // TODO - implement me
-  fprintf(stderr, "Client bingo\n");
   
   mkfifo(req_pipe_path, 0666);
   mkfifo(notif_pipe_path, 0666);
   strcpy(session.req_pipe_path, req_pipe_path);
   strcpy(session.notif_pipe_path, notif_pipe_path);
-  fprintf(stderr, "Client started\n");
   
 
   int serverFd = open(server_pipe_path, O_WRONLY);
@@ -42,13 +40,11 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   write(serverFd, session.notif_pipe_path, MAX_PIPE_PATH_LENGTH);
   //close(serverFd);
 
-  fprintf(stderr, "Client bombo\n");
   int notFd = open(session.notif_pipe_path, O_RDONLY);
   if (notFd < 0) {
     perror("notif open error");
     return EXIT_FAILURE;
   }
-  fprintf(stderr, "sigma bombo\n");
   session.notif_pipe = notFd;
   char buf[2];
   read(notFd, &buf, 2);
@@ -61,11 +57,11 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   int reqFd = open(session.req_pipe_path, O_WRONLY);
   if (reqFd < 0) {
     perror("req open error");
+    debug("Could not open req pipe\n");
     return EXIT_FAILURE;
   }
   session.req_pipe = reqFd;
 
-  printf("raz");
   return 0;
 }
 

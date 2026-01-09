@@ -79,7 +79,6 @@ int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, in
     int response[2] = {OP_CODE_CONNECT, 0};
     ssize_t bytes_written = write(n_fd, response, sizeof(response));
     
-    fprintf(stderr, "escreveu\n");
     if (bytes_written != sizeof(response)) {
         debug("Error writing to notification pipe: %s\n", strerror(errno));
         close(n_fd);
@@ -110,30 +109,39 @@ char get_input_non_blocking(int req_pipe_fd) {
     return '\0';
 }
 
-void writeBoardChanges(int notif_pipe_fd, Board board){
-    char op = '4';
+int writeBoardChanges(int notif_pipe_fd, Board board){
+    char op = OP_CODE_BOARD;
     if (write(notif_pipe_fd, &op, 1)<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
     if (write(notif_pipe_fd, &board.width, sizeof(int))<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
     if (write(notif_pipe_fd, &board.height, sizeof(int))<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
     if (write(notif_pipe_fd, &board.tempo, sizeof(int))<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1; 
     }
     if (write(notif_pipe_fd, &board.victory, sizeof(int))<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
     if (write(notif_pipe_fd, &board.game_over, sizeof(int))<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
     if (write(notif_pipe_fd, &board.accumulated_points, sizeof(int))<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
     if (write(notif_pipe_fd, &board.data, board.height*board.width)<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
+        return -1;
     }
+    return 0;
 }
