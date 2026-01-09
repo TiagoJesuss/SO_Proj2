@@ -13,28 +13,28 @@ typedef struct {
 typedef struct {
     board_t *game_board;
     int ghost_index;
-    bool *leave_thread;
+    int *leave_thread;
 } ghost_thread_args_t;
 
 typedef struct {
     board_t *game_board;
     int *result;
-    bool *leave_thread;
+    int *leave_thread;
     pthread_rwlock_t *lock;
     int req_pipe_fd;
 } pacman_thread_args_t;
 
 typedef struct {
     board_t *game_board;
-    bool *leave_thread;
+    int *leave_thread;
 } ncurses_thread_args_t;
 
 typedef struct {
     board_t *game_board;
-    bool *leave_thread;
-    bool *victory;
+    int *leave_thread;
+    int *victory;
     int notif_fd;
-    bool game_over;
+    int *game_over;
 } screen_thread_args_t;
 
 

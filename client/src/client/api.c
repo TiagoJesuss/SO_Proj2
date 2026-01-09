@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <errno.h>
 
 
 struct Session {
@@ -67,8 +68,17 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
 
 void pacman_play(char command) {
   char op =  OP_CODE_PLAY;
-  write(session.req_pipe, &op, 1);
-  write(session.req_pipe, &command, sizeof(char));
+  debug("pacman_play: Command: %c\n", command);
+  if (write(session.req_pipe, &op, 1) < 0) {
+    debug("Error writing to req pipe: %s\n", strerror(errno));
+    return;
+  }
+  debug("pacman_play: OP CODE sent: %d\n", op);
+  if (write(session.req_pipe, &command, 1) < 0) {
+    debug("Error writing to req pipe: %s\n", strerror(errno));
+    return;
+  }
+  debug("pacman_play: Command sent: %c\n", command);
   // TODO - implement me
 }
 
@@ -91,12 +101,13 @@ Board receive_board_update(void) {
   read(session.notif_pipe, &op, 1);
   read(session.notif_pipe, &cityBoard.width, sizeof(int));
   read(session.notif_pipe, &cityBoard.height, sizeof(int));
-  read(session.notif_pipe, &cityBoard.tempo, sizeof(int));  
+  read(session.notif_pipe, &cityBoard.tempo, sizeof(int));
   read(session.notif_pipe, &cityBoard.victory, sizeof(int));
   read(session.notif_pipe, &cityBoard.game_over, sizeof(int));
   read(session.notif_pipe, &cityBoard.accumulated_points, sizeof(int));
-  cityBoard.data = (char*)malloc(sizeof(char)*(cityBoard.height*cityBoard.width));
+  cityBoard.data = (char*)malloc(sizeof(char)*(cityBoard.height*cityBoard.width+1));
   read(session.notif_pipe, cityBoard.data, cityBoard.height*cityBoard.width);
+  cityBoard.data[cityBoard.height*cityBoard.width] = '\0';
   //nao esquecer dar free ao data
   return cityBoard;
   

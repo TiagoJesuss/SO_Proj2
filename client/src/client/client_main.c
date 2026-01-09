@@ -142,10 +142,8 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        debug("Command: %c\n", command);
-
         pacman_play(command);
-
+        sleep_ms(tempo);
     }
 
     pacman_disconnect();

@@ -33,7 +33,7 @@ void *ncurses_thread(void *arg) {
     ncurses_thread_args_t *args = (ncurses_thread_args_t *)arg;
     board_t *game_board = args->game_board;
     pthread_rwlock_t *ncurses_lock = game_board->ncurses_lock;
-    bool *leave_thread = args->leave_thread;
+    int *leave_thread = args->leave_thread;
 
     while (*leave_thread == 0) {
         pthread_rwlock_wrlock(ncurses_lock);
@@ -45,13 +45,13 @@ void *ncurses_thread(void *arg) {
     return NULL; 
 }
 
-Board process_board_to_api(board_t* game_board, bool victory, bool game_over) {
+Board process_board_to_api(board_t* game_board, int victory, int game_over) {
     Board board_data;
     board_data.width = game_board->width;
     board_data.height = game_board->height;
     board_data.tempo = game_board->tempo;
-    board_data.victory = victory ? 1 : 0;
-    board_data.game_over = game_over ? 1 : 0;
+    board_data.victory = victory;
+    board_data.game_over = game_over;
     board_data.accumulated_points = game_board->pacmans[0].points;
 
     size_t data_size = (size_t)(board_data.width * board_data.height);
@@ -61,32 +61,17 @@ Board process_board_to_api(board_t* game_board, bool victory, bool game_over) {
             int index = i * game_board->width + j;
             board_pos_t *pos = &game_board->board[index];
             char ch = pos->content;
-            if (pos->has_dot) {
-                ch = '.';
-            }
-            if (pos->has_portal) {
-                ch = '@';
-            }
             if (ch == ' ') {
-                int occupied = 0;
-                for (int p = 0; p < game_board->n_pacmans; p++) {
-                    pacman_t *pacman = &game_board->pacmans[p];
-                    if (pacman->alive && pacman->pos_x == j && pacman->pos_y == i) {
-                        ch = 'P';
-                        occupied = 1;
-                        break;
-                    }
+                if (pos->has_dot) {
+                    ch = '.';
                 }
-                if (!occupied) {
-                    for (int g = 0; g < game_board->n_ghosts; g++) {
-                        ghost_t *ghost = &game_board->ghosts[g];
-                        if (ghost->pos_x == j && ghost->pos_y == i) {
-                            ch = 'M';
-                            break;
-                        }
-                    }
+                if (pos->has_portal) {
+                    ch = '@';
                 }
             }
+            if (ch == 'W') ch = '#';
+            if (ch == 'P') ch = 'C';
+            if (ch == 'G') ch = 'M';
             board_data.data[index] = ch;
         }
     }
@@ -98,18 +83,21 @@ Board process_board_to_api(board_t* game_board, bool victory, bool game_over) {
 void *screen_thread(void *arg) {
     screen_thread_args_t *args = (screen_thread_args_t *)arg;
     board_t *game_board = args->game_board;
-    bool *leave_thread = args->leave_thread;
-    bool *victory = args->victory;
+    int *leave_thread = args->leave_thread;
+    int tempo = args->game_board->tempo;
+    int *victory = args->victory;
     int notif_fd = args->notif_fd;
-    bool game_over = args->game_over;
-    Board board_data = process_board_to_api(game_board, *victory, game_over);
+    int *game_over = args->game_over;
+    debug("SCREEN THREAD STARTED\n");
+    debug("Victory: %d\nGame Over: %d\n", *victory, *game_over);
 
-    while (!*leave_thread) {
+    while (*leave_thread == 0) {
+        Board board_data = process_board_to_api(game_board, *victory, *game_over);
         if (writeBoardChanges(notif_fd, board_data) < 0) {
             debug("Error writing to notification pipe: %s\n", strerror(errno));
             break;
         }
-        sleep_ms(game_board->tempo);
+        sleep_ms(tempo);
     }
     return NULL; 
 }
@@ -118,7 +106,7 @@ void *ghost_thread(void *arg) {
     ghost_thread_args_t *args = (ghost_thread_args_t *)arg;
     board_t *game_board = args->game_board;
     int ghost_index = args->ghost_index;
-    bool *leave_thread = args->leave_thread;
+    int *leave_thread = args->leave_thread;
 
     ghost_t* ghost = &game_board->ghosts[ghost_index];
     while (*leave_thread == 0) {
@@ -130,11 +118,12 @@ void *ghost_thread(void *arg) {
 }
 
 void *pacman_thread(void *arg) {
+    debug("PACMAN THREAD STARTED\n");
     pacman_thread_args_t *args = (pacman_thread_args_t *)arg;
     board_t *game_board = args->game_board;
     pacman_t *pacman = &game_board->pacmans[0];
     int *result = args->result;
-    bool *leave_thread = args->leave_thread;
+    int *leave_thread = args->leave_thread;
     int req_pipe_fd = args->req_pipe_fd;
     pthread_rwlock_t *lock = args->lock;
 
@@ -143,11 +132,6 @@ void *pacman_thread(void *arg) {
         command_t c;
 
         if (pacman->n_moves == 0) { // Se for entrada do usuário
-            /*
-            pthread_rwlock_rdlock(ncurses_lock);
-            c.command = get_input();
-            pthread_rwlock_unlock(ncurses_lock);
-            */
             c.command = get_input_non_blocking(req_pipe_fd);
             if (c.command == '\0') {
                 continue; // Sem entrada, continua
@@ -436,14 +420,15 @@ int read_dir(char *argv, level_info *level_info) {
     return x;
 }
 
-void pacman_thread_args_init(pacman_thread_args_t *args, board_t *game_board, int *result, bool *leave_thread, pthread_rwlock_t *lock) {
+void pacman_thread_args_init(pacman_thread_args_t *args, board_t *game_board, int *result, int *leave_thread, pthread_rwlock_t *lock, int req_pipe_fd) {
     args->game_board = game_board;
     args->result = result;
     args->leave_thread = leave_thread;
     args->lock = lock;
+    args->req_pipe_fd = req_pipe_fd;
 }
 
-void ghost_thread_args_init(ghost_thread_args_t *args, board_t *game_board, int ghost_index, bool *leave_thread) {
+void ghost_thread_args_init(ghost_thread_args_t *args, board_t *game_board, int ghost_index, int *leave_thread) {
     args->game_board = game_board;
     args->ghost_index = ghost_index;
     args->leave_thread = leave_thread;
@@ -484,26 +469,28 @@ int main(int argc, char** argv) {
     int client_notif_fd = -1;
     connect_request_t request;
     if (read_connect_request(reg_pipe_fd, &request) < 0) {
+        debug("Error reading connect request\n");
         close(reg_pipe_fd);
         close_debug_file();
         return EXIT_FAILURE;
     }
     if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd) < 0) {
+        debug("Error opening client pipes\n");
         close(reg_pipe_fd);
         close_debug_file();
         return EXIT_FAILURE;
     }
     
     int accumulated_points = 0;
-    bool end_game = false;
+    int end_game = 0;
     board_t game_board = {0};
     int lvl = 0;
     int result;
-    bool leave_thread = false;
-    bool victory = false;
+    int leave_thread = 0;
+    int victory = 0;
 
     pacman_thread_args_t pacman_args;
-    pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l);
+    pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l, client_req_fd);
     pthread_t pacman_tid;
 
     game_board.ncurses_lock = &ncurses_lock;
@@ -519,6 +506,7 @@ int main(int argc, char** argv) {
     screen_thread_args.leave_thread = &leave_thread;
     screen_thread_args.victory = &victory;
     screen_thread_args.notif_fd = client_notif_fd;
+    screen_thread_args.game_over = &end_game;
     pthread_t screen_tid;
 
     ghost_thread_args_t ghost_args[MAX_GHOSTS];
@@ -531,18 +519,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < game_board.n_ghosts; i++) {
             ghost_thread_args_init(&ghost_args[i], &game_board, i, &leave_thread);
         }
-        //draw_board(&game_board, DRAW_MENU); -> vai ser feito do lado do cliente
-        //refresh_screen(); -> vai ser feito do lado do cliente
         while(true) {
-            /*
-            if (pthread_create(&ncurses_tid, NULL, ncurses_thread, &ncurses_thread_args) != 0) {
-                perror("pthread_create");
-                exit(EXIT_FAILURE);
-            }*/
-            if (pthread_create(&screen_tid, NULL, screen_thread, &screen_thread_args) != 0) {
-                perror("pthread_create");
-                exit(EXIT_FAILURE);
-            }
             if (pthread_create(&pacman_tid, NULL, pacman_thread, &pacman_args) != 0) {
                 perror("pthread_create");
                 exit(EXIT_FAILURE);
@@ -553,37 +530,35 @@ int main(int argc, char** argv) {
                     exit(EXIT_FAILURE);
                 }
             }
+            if (pthread_create(&screen_tid, NULL, screen_thread, &screen_thread_args) != 0) {
+                perror("pthread_create");
+                exit(EXIT_FAILURE);
+            }
             pthread_join(pacman_tid, NULL);
             for (int i = 0; i < game_board.n_ghosts; i++) {
                 pthread_join(ghost_tids[i], NULL);
             }
             pthread_join(screen_tid, NULL);
-            //pthread_join(ncurses_tid, NULL);
             leave_thread = false;
             if(result == NEXT_LEVEL) {
+                debug("LEVEL COMPLETED\n");
                 lvl++;
                 if (lvl >= n_levels) {
-                    //screen_refresh(&game_board, DRAW_WIN);
-                    victory = true;
-                    end_game = true;
+                    victory = 1;
+                    end_game = 1;
                 } else {
-                    //screen_refresh(&game_board, DRAW_MENU);
                 }
                 sleep_ms(game_board.tempo);
                 break;
             }
             if(result == QUIT_GAME) {
-                //screen_refresh(&game_board, DRAW_GAME_OVER); 
                 sleep_ms(game_board.tempo);
-                end_game = true;
+                end_game = 1;
                 break;
             }
-    
-            //screen_refresh(&game_board, DRAW_MENU); 
 
             accumulated_points = game_board.pacmans[0].points;      
         }
-        //print_board(&game_board);
         unload_level(&game_board);
     }
     

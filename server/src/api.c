@@ -54,7 +54,7 @@ int read_connect_request(int req_fd, connect_request_t *request) {
         return -1;
     }
     if (op != OP_CODE_CONNECT) {
-        debug("Invalid operation code: %d\n", &op);
+        debug("Invalid operation code: %d\n", op);
         return -1;
     }
     request->op_code = op;
@@ -76,7 +76,7 @@ int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, in
         return -1;
     }
 
-    int response[2] = {OP_CODE_CONNECT, 0};
+    char response[2] = {OP_CODE_CONNECT, 0};
     ssize_t bytes_written = write(n_fd, response, sizeof(response));
     
     if (bytes_written != sizeof(response)) {
@@ -93,19 +93,32 @@ int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, in
 }
 
 char get_input_non_blocking(int req_pipe_fd) {
-
     char op;
-    char mov;
-    if (read(req_pipe_fd, &op, 1)<0){
-        debug("Error reading from reply pipe: %s\n", strerror(errno));
+    char mov = '\0';
+    ssize_t bytes_read = read(req_pipe_fd, &op, 1);
+
+    if (bytes_read <= 0) {
+        return '\0';
     }
-    int byteRead = read(req_pipe_fd, &mov, 1);
-    if (byteRead<0 && (errno == EAGAIN || errno == EWOULDBLOCK)){
-        return '\0'; 
+
+    if (op == OP_CODE_PLAY) {
+        int retries = 0;
+        while (retries < 1000) {
+            bytes_read = read(req_pipe_fd, &mov, 1);
+            if (bytes_read > 0) {
+                debug("Command received: %c\n", mov);
+                return mov;
+            }
+            if (bytes_read == 0) return '\0';
+            if (errno != EAGAIN && errno != EWOULDBLOCK) return '\0';
+            
+            // Pequena pausa para dar tempo ao dado chegar ao pipe
+            sleep_ms(1); 
+            retries++;
+        }
+        debug("Error: Timed out waiting for move after OP_CODE_PLAY\n");
     }
-    if (byteRead<0){
-        debug("Error reading from reply pipe: %s\n", strerror(errno));
-    }
+    
     return '\0';
 }
 
@@ -139,7 +152,7 @@ int writeBoardChanges(int notif_pipe_fd, Board board){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
         return -1;
     }
-    if (write(notif_pipe_fd, &board.data, board.height*board.width)<0){
+    if (write(notif_pipe_fd, board.data, board.height*board.width)<0){
         debug("Error writing from notif pipe: %s\n", strerror(errno));
         return -1;
     }
