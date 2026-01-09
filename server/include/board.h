@@ -2,6 +2,7 @@
 #define BOARD_H
 
 #include <pthread.h>
+#include "api.h"
 
 #define MAX_MOVES 20 
 #define MAX_LEVELS 20
@@ -82,6 +83,11 @@ typedef struct {
     pac_ghost_info ghosts_info[MAX_GHOSTS];
     pac_ghost_info pacman_info; //isto é usado?
 } level_info;
+
+typedef struct queue{
+    connect_request_t request;
+    struct queue *next;
+} Queue;
 
 /*Makes the current thread sleep for 'int milliseconds' miliseconds*/
 void sleep_ms(int milliseconds);

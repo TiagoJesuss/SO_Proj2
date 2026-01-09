@@ -61,7 +61,7 @@ int read_connect_request(int req_fd, connect_request_t *request) {
     return 1;
 }
 
-int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, int *rep_fd, int *notif_fd, int available_slots) {
+int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, int *rep_fd, int *notif_fd) {
     
     int n_fd = open(notif_pipe_path, O_RDWR);
     if (n_fd < 0) { //esta a entrar aqui dentro
@@ -75,14 +75,7 @@ int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, in
         close(n_fd);
         return -1;
     }
-    char response[2];
-    if (available_slots > 0) {
-        response[0] = OP_CODE_CONNECT;
-        response[1] = 0;
-    } else {
-        response[0] = OP_CODE_CONNECT;
-        response[1] = -1;
-    }
+    char response[2] = {OP_CODE_CONNECT, 0};
     
     ssize_t bytes_written = write(n_fd, response, sizeof(response));
     
@@ -114,7 +107,6 @@ char get_input_non_blocking(int req_pipe_fd) {
         while (retries < 1000) {
             bytes_read = read(req_pipe_fd, &mov, 1);
             if (bytes_read > 0) {
-                debug("Command received: %c\n", mov);
                 return mov;
             }
             if (bytes_read == 0) return '\0';

@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <errno.h>
+#include <semaphore.h>
 
 #define CONTINUE_PLAY 0
 #define NEXT_LEVEL 1
@@ -128,8 +129,6 @@ void *pacman_thread(void *arg) {
             play = &pacman->moves[pacman->current_move % pacman->n_moves];
             debug("MOVE %d - %c\n", pacman->current_move % pacman->n_moves, play->command);
         }
-
-        debug("KEY %c\n", play->command);
 
         if (play->command == 'Q') {
             pthread_rwlock_wrlock(lock);
@@ -410,105 +409,153 @@ void ghost_thread_args_init(ghost_thread_args_t *args, board_t *game_board, int 
     args->leave_thread = leave_thread;
 }
 
+connect_request_t queue_pop(Queue *head) {
+    if (head == NULL) {
+        connect_request_t empty_request = {0};
+        return empty_request; // Fila vazia
+    }
+    Queue *first_node = head->next;
+    connect_request_t request = head->request;
+    head = first_node;
+    free(first_node);
+    return request;
+}
+
 void *worker_thread(void *arg) {
     worker_thread_args_t *args = (worker_thread_args_t *)arg;
     level_info *level_info = args->level_info;
     int n_levels = args->n_levels;
-    int client_req_fd = args->client_req_fd;
-    int client_notif_fd = args->client_notif_fd;
-    int *clients = args->clients;
-    int accumulated_points = 0;
-    int end_game = 0;
-    board_t game_board = {0};
-    int lvl = 0;
-    int result;
-    int leave_thread = 0;
-    int victory = 0;
-    pthread_rwlock_t l = PTHREAD_RWLOCK_INITIALIZER;
+    //int client_req_fd = args->client_req_fd;
+    //int client_notif_fd = args->client_notif_fd;
+    //int *clients = args->clients;
+    int thread_id = args->thread_id;
+    Queue *queue = args->queue;
+    sem_t *sem_items = args->sem_items;
+    pthread_mutex_t *mutex_queue = args->mutex_queue;
 
+    while (true) {
+        int client_req_fd = -1;
+        int client_notif_fd = -1;
+        sem_wait(sem_items);
+        debug("Worker thread %d woke up, checking queue\n", thread_id);
+        pthread_mutex_lock(mutex_queue);
 
-    pacman_thread_args_t pacman_args;
-    pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l, client_req_fd);
-    pthread_t pacman_tid;
+        connect_request_t request = queue_pop(queue);
+        pthread_mutex_unlock(mutex_queue);
 
-    screen_thread_args_t screen_thread_args;
-    screen_thread_args.game_board = &game_board;
-    screen_thread_args.leave_thread = &leave_thread;
-    screen_thread_args.victory = &victory;
-    screen_thread_args.notif_fd = client_notif_fd;
-    screen_thread_args.game_over = &end_game;
-    pthread_t screen_tid;
+        debug("Worker thread %d processing request: %d %s %s\n", thread_id, request.op_code, request.rep_pipe, request.notif_pipe);
 
-    ghost_thread_args_t ghost_args[MAX_GHOSTS];
-    pthread_t ghost_tids[MAX_GHOSTS];
-
-    while (!end_game) {
-        load_level(&game_board, accumulated_points, &level_info[lvl]);
-        for (int i = 0; i < game_board.n_ghosts; i++) {
-            ghost_thread_args_init(&ghost_args[i], &game_board, i, &leave_thread);
+        if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd) < 0) {
+            debug("Error opening client pipes\n");
+            continue;
         }
-        while(true) {
-            if (pthread_create(&pacman_tid, NULL, pacman_thread, &pacman_args) != 0) {
-                perror("pthread_create");
-                exit(EXIT_FAILURE);
-            }
+
+        int accumulated_points = 0;
+        int end_game = 0;
+        board_t game_board = {0};
+        int lvl = 0;
+        int result;
+        int leave_thread = 0;
+        int victory = 0;
+        pthread_rwlock_t l = PTHREAD_RWLOCK_INITIALIZER;
+
+        pacman_thread_args_t pacman_args;
+        pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l, client_req_fd);
+        pthread_t pacman_tid;
+
+        screen_thread_args_t screen_thread_args;
+        screen_thread_args.game_board = &game_board;
+        screen_thread_args.leave_thread = &leave_thread;
+        screen_thread_args.victory = &victory;
+        screen_thread_args.notif_fd = client_notif_fd;
+        screen_thread_args.game_over = &end_game;
+        pthread_t screen_tid;
+
+        ghost_thread_args_t ghost_args[MAX_GHOSTS];
+        pthread_t ghost_tids[MAX_GHOSTS];
+
+        while (!end_game) {
+            load_level(&game_board, accumulated_points, &level_info[lvl]);
             for (int i = 0; i < game_board.n_ghosts; i++) {
-                if (pthread_create(&ghost_tids[i], NULL, ghost_thread, &ghost_args[i]) != 0) {
+                ghost_thread_args_init(&ghost_args[i], &game_board, i, &leave_thread);
+            }
+            while(true) {
+                if (pthread_create(&pacman_tid, NULL, pacman_thread, &pacman_args) != 0) {
                     perror("pthread_create");
                     exit(EXIT_FAILURE);
                 }
-            }
-            if (pthread_create(&screen_tid, NULL, screen_thread, &screen_thread_args) != 0) {
-                perror("pthread_create");
-                exit(EXIT_FAILURE);
-            }
-            pthread_join(pacman_tid, NULL);
-            for (int i = 0; i < game_board.n_ghosts; i++) {
-                pthread_join(ghost_tids[i], NULL);
-            }
-            pthread_join(screen_tid, NULL);
-            leave_thread = false;
-            if(result == NEXT_LEVEL) {
-                debug("LEVEL COMPLETED\n");
-                lvl++;
-                if (lvl >= n_levels) {
-                    victory = 1;
+                for (int i = 0; i < game_board.n_ghosts; i++) {
+                    if (pthread_create(&ghost_tids[i], NULL, ghost_thread, &ghost_args[i]) != 0) {
+                        perror("pthread_create");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                if (pthread_create(&screen_tid, NULL, screen_thread, &screen_thread_args) != 0) {
+                    perror("pthread_create");
+                    exit(EXIT_FAILURE);
+                }
+                pthread_join(pacman_tid, NULL);
+                for (int i = 0; i < game_board.n_ghosts; i++) {
+                    pthread_join(ghost_tids[i], NULL);
+                }
+                pthread_join(screen_tid, NULL);
+                leave_thread = false;
+                if(result == NEXT_LEVEL) {
+                    debug("LEVEL COMPLETED\n");
+                    lvl++;
+                    if (lvl >= n_levels) {
+                        victory = 1;
+                        end_game = 1;
+                        Board board_data = process_board_to_api(&game_board, victory, end_game);
+                        if (writeBoardChanges(client_notif_fd, board_data) < 0) {
+                            debug("Error writing to notification pipe: %s\n", strerror(errno));
+                        }
+                    }
+                    sleep_ms(game_board.tempo);
+                    break;
+                }
+                if(result == QUIT_GAME) {
+                    sleep_ms(game_board.tempo);
                     end_game = 1;
+
                     Board board_data = process_board_to_api(&game_board, victory, end_game);
                     if (writeBoardChanges(client_notif_fd, board_data) < 0) {
                         debug("Error writing to notification pipe: %s\n", strerror(errno));
                     }
+                    free(board_data.data);
+
+                    break;
                 }
-                sleep_ms(game_board.tempo);
-                break;
+
+                accumulated_points = game_board.pacmans[0].points;      
             }
-            if(result == QUIT_GAME) {
-                sleep_ms(game_board.tempo);
-                end_game = 1;
-
-                Board board_data = process_board_to_api(&game_board, victory, end_game);
-                if (writeBoardChanges(client_notif_fd, board_data) < 0) {
-                    debug("Error writing to notification pipe: %s\n", strerror(errno));
-                }
-                free(board_data.data);
-
-                break;
-            }
-
-            accumulated_points = game_board.pacmans[0].points;      
+            unload_level(&game_board);
         }
-        unload_level(&game_board);
+        close(client_req_fd);
+        close(client_notif_fd);
+        //(*clients)--;
     }
-    close(client_req_fd);
-    close(client_notif_fd);
-    (*clients)--;
+
     return NULL;
 }
 
-typedef struct queue{
-    connect_request_t request;
-    struct queue *next;
-} Queue;
+void queue_push(Queue *head, connect_request_t request) {
+    Queue *new_node = (Queue *)malloc(sizeof(Queue));
+    new_node->request = request;
+    new_node->next = NULL;
+
+    if (head == NULL || (head->request.op_code == 0 && head->request.rep_pipe[0] == '\0' && head->request.notif_pipe[0] == '\0')) {
+        *head = *new_node;
+        free(new_node);
+        return;
+    }
+
+    Queue *current = head;
+    while (current->next != NULL) {
+        current = current->next;
+    }
+    current->next = new_node;
+}
 
 int main(int argc, char** argv) {
     if (argc != 4) {
@@ -522,6 +569,12 @@ int main(int argc, char** argv) {
     char *register_fifo_path = argv[3];
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
+
+    sem_t sem_items;
+    pthread_mutex_t mutex_queue;
+
+    sem_init(&sem_items, 0, 0);
+    pthread_mutex_init(&mutex_queue, NULL);
 
 
     int reg_pipe_fd = create_and_open_reg_fifo(register_fifo_path);
@@ -538,63 +591,70 @@ int main(int argc, char** argv) {
         close(logFd);
     }
     */
-    connect_request_t request;
-    int client_req_fd[max_games] = {-1};
-    int client_notif_fd[max_games] = {-1};
-    
 
-    
-    int clients = 0;
+    Queue *head = (Queue*)malloc(sizeof(Queue));
+    head->request = (connect_request_t){0};
+    head->next = NULL;
+
+    //int clients = 0;
     pthread_t worker_tid;
     for (int i = 0; i<max_games; i++){
+        debug("Creating worker thread %d\n", i);
         worker_thread_args_t worker_args;
         worker_args.level_info = level_info;
         worker_args.n_levels = n_levels;
-        worker_args.client_req_fd = &client_req_fd[i];
-        worker_args.client_notif_fd = &client_notif_fd[i];
-        worker_args.clients = &clients;
-        worker_args.client_id = i;
+        //worker_args.clients = &clients;
+        worker_args.thread_id = i;
+        worker_args.queue = head;
+        worker_args.sem_items = &sem_items;
+        worker_args.mutex_queue = &mutex_queue;
         if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
             perror("pthread_create");
             continue;
         }
     }
-
-    Queue *head = (Queue*)malloc(sizeof(Queue));
+    debug("Server is running and waiting for clients...\n");
     
-
     while (1) {
-            connect_request_t request;
-            if (read_connect_request(reg_pipe_fd, &request) < 0) {
-                debug("Error reading connect request\n");
-                continue;
-            }
-            
-            if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd, (max_games - clients)) < 0) {
-                debug("Error opening client pipes\n");
-                close(reg_pipe_fd);
-                continue;
-            }
-            if (clients >= max_games) {
-                debug("Max clients reached, rejecting new client\n");
-                close(client_req_fd);
-                close(client_notif_fd);
-                continue;
-            }
-            worker_thread_args_t worker_args;
-            worker_args.level_info = level_info;
-            worker_args.n_levels = n_levels;
-            worker_args.client_req_fd = client_req_fd;
-            worker_args.client_notif_fd = client_notif_fd;
-            worker_args.clients = &clients;
-            pthread_t worker_tid;
-            if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
-                perror("pthread_create");
-                close(client_req_fd);
-                close(client_notif_fd);
-                continue;
-            }
-            clients++;
+        connect_request_t request;
+        if (read_connect_request(reg_pipe_fd, &request) < 0) {
+            debug("Error reading connect request\n");
+            continue;
+        }
+        debug("Received connection request: rep_pipe=%s, notif_pipe=%s\n", request.rep_pipe, request.notif_pipe);
+        pthread_mutex_lock(&mutex_queue);
+        queue_push(head, request);
+        debug("request: %d %s %s\n", head->request.op_code, head->request.rep_pipe, head->request.notif_pipe);
+        pthread_mutex_unlock(&mutex_queue);
+        sem_post(&sem_items);
+        debug("Client added to the queue\n");
+        /*
+        if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd, (max_games - clients)) < 0) {
+            debug("Error opening client pipes\n");
+            close(reg_pipe_fd);
+            continue;
+        }
+        if (clients >= max_games) {
+            debug("Max clients reached, rejecting new client\n");
+            close(client_req_fd);
+            close(client_notif_fd);
+            continue;
+        }
+        worker_thread_args_t worker_args;
+        worker_args.level_info = level_info;
+        worker_args.n_levels = n_levels;
+        worker_args.client_req_fd = client_req_fd;
+        worker_args.client_notif_fd = client_notif_fd;
+        worker_args.clients = &clients;
+        pthread_t worker_tid;
+        if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
+            perror("pthread_create");
+            close(client_req_fd);
+            close(client_notif_fd);
+            continue;
+        }
+        clients++;
+        */
     }
     close(reg_pipe_fd);
     close_debug_file();

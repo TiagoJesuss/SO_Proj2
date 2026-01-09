@@ -4,6 +4,7 @@
 #include "board.h"
 #include <pthread.h>
 #include "api.h"
+#include <semaphore.h>
 
 typedef struct {
     char path[1024];
@@ -40,10 +41,11 @@ typedef struct {
 typedef struct {
     level_info *level_info;
     int n_levels;
-    int *client_req_fd;
-    int *client_notif_fd;
-    int *clients;
-    int client_id;
+    //int *clients;
+    int thread_id;
+    Queue *queue;
+    sem_t *sem_items;
+    pthread_mutex_t *mutex_queue;
 } worker_thread_args_t;
 
 
