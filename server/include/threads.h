@@ -37,5 +37,13 @@ typedef struct {
     int *game_over;
 } screen_thread_args_t;
 
+typedef struct {
+    level_info *level_info;
+    int n_levels;
+    int client_req_fd;
+    int client_notif_fd;
+    int *clients;
+} worker_thread_args_t;
+
 
 #endif

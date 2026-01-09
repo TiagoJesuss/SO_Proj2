@@ -28,5 +28,6 @@ int read_connect_request(int req_fd, connect_request_t *request);
 int open_client_pipes(const char *rep_pipe_path, const char *notif_pipe_path, int *rep_fd, int *notif_fd);
 char get_input_non_blocking(int req_pipe_fd);
 int writeBoardChanges(int notif_pipe_fd, Board board);
+void send_error_response(int notif_pipe_fd);
 
 #endif

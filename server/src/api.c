@@ -164,3 +164,16 @@ int writeBoardChanges(int notif_pipe_fd, Board board){
     }
     return 0;
 }
+
+void send_error_response(int notif_pipe_fd) {
+    char op = OP_CODE_CONNECT;
+    char errror_code = -1;
+    if (write(notif_pipe_fd, &op, 1) < 0) {
+        debug("Error writing error response to notif pipe: %s\n", strerror(errno));
+        return;
+    }
+    if (write(notif_pipe_fd, &errror_code, 1) < 0) {
+        debug("Error writing error code to notif pipe: %s\n", strerror(errno));
+        return;
+    }
+}

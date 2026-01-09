@@ -60,7 +60,6 @@ typedef struct {
     char pacman_file[256];  // file with pacman movements
     char ghosts_files[MAX_GHOSTS][256]; // files with monster movements
     int tempo;              // Duration of each play
-    pthread_rwlock_t *ncurses_lock; // lock for ncurses drawing
 } board_t;
 
 typedef struct {
