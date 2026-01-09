@@ -98,6 +98,7 @@ char get_input_non_blocking(int req_pipe_fd) {
     ssize_t bytes_read = read(req_pipe_fd, &op, 1);
 
     if (bytes_read <= 0) {
+        if (bytes_read == 0) return 'Q';
         return '\0';
     }
 
@@ -117,6 +118,11 @@ char get_input_non_blocking(int req_pipe_fd) {
             retries++;
         }
         debug("Error: Timed out waiting for move after OP_CODE_PLAY\n");
+    } else if (op == OP_CODE_DISCONNECT) {
+        debug("Client requested disconnect\n");
+        return 'Q';
+    } else {
+        debug("Invalid operation code received: %d\n", op);
     }
     
     return '\0';

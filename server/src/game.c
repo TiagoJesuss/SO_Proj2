@@ -494,12 +494,6 @@ int main(int argc, char** argv) {
     pthread_t pacman_tid;
 
     game_board.ncurses_lock = &ncurses_lock;
-    /*
-    ncurses_thread_args_t ncurses_thread_args;
-    pthread_t ncurses_tid;
-    ncurses_thread_args.game_board = &game_board;
-    ncurses_thread_args.leave_thread = &leave_thread;
-    */
 
     screen_thread_args_t screen_thread_args;
     screen_thread_args.game_board = &game_board;
@@ -546,7 +540,10 @@ int main(int argc, char** argv) {
                 if (lvl >= n_levels) {
                     victory = 1;
                     end_game = 1;
-                } else {
+                    Board board_data = process_board_to_api(&game_board, victory, end_game);
+                    if (writeBoardChanges(client_notif_fd, board_data) < 0) {
+                        debug("Error writing to notification pipe: %s\n", strerror(errno));
+                    }
                 }
                 sleep_ms(game_board.tempo);
                 break;
@@ -554,6 +551,13 @@ int main(int argc, char** argv) {
             if(result == QUIT_GAME) {
                 sleep_ms(game_board.tempo);
                 end_game = 1;
+
+                Board board_data = process_board_to_api(&game_board, victory, end_game);
+                if (writeBoardChanges(client_notif_fd, board_data) < 0) {
+                    debug("Error writing to notification pipe: %s\n", strerror(errno));
+                }
+                free(board_data.data);
+
                 break;
             }
 
@@ -566,8 +570,8 @@ int main(int argc, char** argv) {
         free(level_info[i].board);
     }
     close(reg_pipe_fd);
-
-    //terminal_cleanup();
+    close(client_req_fd);
+    close(client_notif_fd);
 
     close_debug_file();
 

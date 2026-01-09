@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 
 
 Board board;
@@ -24,8 +25,15 @@ static void *receiver_thread(void *arg) {
     while (true) {
         
         Board board = receive_board_update();
-
-        if (!board.data || board.game_over == 1){
+        debug("receiver\n");
+        if (!board.data || board.game_over == 1 || board.victory == 1) {
+            debug("Game over received, stopping receiver thread\n");
+            if (board.data) {
+                draw_board_client(board);
+                refresh_screen();
+                sleep_ms(2000);
+                free(board.data);
+            }
             pthread_mutex_lock(&mutex);
             stop_execution = true;
             pthread_mutex_unlock(&mutex);
@@ -46,6 +54,7 @@ static void *receiver_thread(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
+    signal(SIGPIPE, SIG_IGN);
     if (argc != 3 && argc != 4) {
         fprintf(stderr,
             "Usage: %s <client_id> <register_pipe> [commands_file]\n",
@@ -145,8 +154,9 @@ int main(int argc, char *argv[]) {
         pacman_play(command);
         sleep_ms(tempo);
     }
-
+    debug("Client main loop exited, disconnecting...\n");
     pacman_disconnect();
+    debug("Waiting for receiver thread to finish...\n");
 
     pthread_join(receiver_thread_id, NULL);
 
@@ -155,7 +165,10 @@ int main(int argc, char *argv[]) {
     }
     pthread_mutex_destroy(&mutex);
 
+    debug("Client exiting, cleaning up terminal...\n");
     terminal_cleanup();
+    debug("Client exited cleanly.\n");
 
+    close_debug_file();
     return 0;
 }

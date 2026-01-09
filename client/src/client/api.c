@@ -83,14 +83,16 @@ void pacman_play(char command) {
 }
 
 int pacman_disconnect() {
-  // TODO - implement me
   char op = OP_CODE_DISCONNECT;
-  write(session.req_pipe, &op, 1);
+  debug("pacman_disconnect: Disconnecting...\n");
+  if (write(session.req_pipe, &op, 1) < 0) {
+    debug("Error writing to req pipe: %s\n", strerror(errno));
+  } else {
+    debug("pacman_disconnect: OP CODE sent: %d\n", op);
+  }
   close(session.req_pipe);
-  close(session.notif_pipe);
-
-  //unlink(session.req_pipe);
-  //unlink(session.notif_pipe);
+  debug("pacman_disconnect: Req pipe closed\n");
+  close(session.notif_pipe); 
   return 0; 
 }
 
@@ -98,15 +100,48 @@ Board receive_board_update(void) {
     // TODO - implement me
   Board cityBoard;
   char op;
-  read(session.notif_pipe, &op, 1);
-  read(session.notif_pipe, &cityBoard.width, sizeof(int));
-  read(session.notif_pipe, &cityBoard.height, sizeof(int));
-  read(session.notif_pipe, &cityBoard.tempo, sizeof(int));
-  read(session.notif_pipe, &cityBoard.victory, sizeof(int));
-  read(session.notif_pipe, &cityBoard.game_over, sizeof(int));
-  read(session.notif_pipe, &cityBoard.accumulated_points, sizeof(int));
+  if (read(session.notif_pipe, &op, 1) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
+  if (read(session.notif_pipe, &cityBoard.width, sizeof(int)) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
+  if (read(session.notif_pipe, &cityBoard.height, sizeof(int)) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
+  if (read(session.notif_pipe, &cityBoard.tempo, sizeof(int)) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
+  if (read(session.notif_pipe, &cityBoard.victory, sizeof(int)) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
+  if (read(session.notif_pipe, &cityBoard.game_over, sizeof(int)) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
+  if (read(session.notif_pipe, &cityBoard.accumulated_points, sizeof(int)) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
   cityBoard.data = (char*)malloc(sizeof(char)*(cityBoard.height*cityBoard.width+1));
-  read(session.notif_pipe, cityBoard.data, cityBoard.height*cityBoard.width);
+  if (read(session.notif_pipe, cityBoard.data, cityBoard.height*cityBoard.width) <= 0) {
+    debug("Error reading from FIFO: %s\n", strerror(errno));
+    free(cityBoard.data); // free memory if read fails
+    cityBoard.data = NULL;
+    return cityBoard;
+  }
   cityBoard.data[cityBoard.height*cityBoard.width] = '\0';
   //nao esquecer dar free ao data
   return cityBoard;
