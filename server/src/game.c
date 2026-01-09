@@ -471,7 +471,15 @@ int main(int argc, char** argv) {
         close_debug_file();
         return EXIT_FAILURE;
     }
-
+    /*
+    if (signal(SIGUSR1, handler)==){
+        x = 1;
+        int logFd = open("topFiveClients.txt", O_WRONLY | O_CREAT, 0644);
+        getTopFive;
+        write(logFd, );
+        close(logFd);
+    }
+    */
     int client_req_fd = -1; 
     int client_notif_fd = -1;
     connect_request_t request;
