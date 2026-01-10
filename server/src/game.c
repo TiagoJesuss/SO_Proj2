@@ -527,6 +527,7 @@ void *worker_thread(void *arg) {
                             debug("Error writing to notification pipe: %s\n", strerror(errno));
                         }
                     }
+                    accumulated_points = game_board.pacmans[0].points;
                     sleep_ms(game_board.tempo);
                     break;
                 }
@@ -541,9 +542,7 @@ void *worker_thread(void *arg) {
                     free(board_data.data);
 
                     break;
-                }
-
-                accumulated_points = game_board.pacmans[0].points;      
+                }  
             }
             unload_level(&game_board);
         }
@@ -599,7 +598,7 @@ void generate_top5_file(game_state_t *games, int max_games) {
         
         for (int i = 0; i < limit; i++) {
             int len = sprintf(buffer, "Client ID: %d, Score: %d\n", 
-                            temp_games[i].client_id, temp_games[i].score);
+                            temp_games[i].client_id+1, temp_games[i].score);
             write(fd, buffer, len);
         }
         close(fd);
@@ -614,6 +613,16 @@ int main(int argc, char** argv) {
         printf("Usage: %s <level_directory> <max_games> <register_fifo_path>\n", argv[0]);
         return EXIT_FAILURE;
     }
+
+    struct sigaction sa;
+    sa.sa_handler = handle_sigusr1;
+    sa.sa_flags = 0; // Importante para o read ser interrompido
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("sigaction");
+        return EXIT_FAILURE;
+    }
+
     open_debug_file("debug.log");
     level_info level_info[MAX_LEVELS];
     int n_levels = read_dir(argv[1], level_info);
@@ -635,15 +644,6 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    struct sigaction sa;
-    sa.sa_handler = handle_sigusr1;
-    sa.sa_flags = 0; // Importante para o read ser interrompido
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
-        perror("sigaction");
-        return EXIT_FAILURE;
-    }
-
     Queue *head = (Queue*)malloc(sizeof(Queue));
     head->request = (connect_request_t){0};
     head->next = NULL;
@@ -653,23 +653,32 @@ int main(int argc, char** argv) {
     pthread_t worker_tid;
     for (int i = 0; i<max_games; i++){
         debug("Creating worker thread %d\n", i);
-        worker_thread_args_t worker_args;
-        worker_args.level_info = level_info;
-        worker_args.n_levels = n_levels;
-        worker_args.thread_id = i;
-        worker_args.queue = head;
-        worker_args.sem_items = &sem_items;
-        worker_args.mutex_queue = &mutex_queue;
-        worker_args.game_state = &game_state[i];
-        if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
+        worker_thread_args_t *worker_args = malloc(sizeof(worker_thread_args_t));
+        worker_args->level_info = level_info;
+        worker_args->n_levels = n_levels;
+        worker_args->thread_id = i;
+        worker_args->queue = head;
+        worker_args->sem_items = &sem_items;
+        worker_args->mutex_queue = &mutex_queue;
+        worker_args->game_state = &game_state[i];
+        if (pthread_create(&worker_tid, NULL, worker_thread, worker_args) != 0) {
             perror("pthread_create");
+            free(worker_args);
             continue;
         }
     }
     debug("Server is running and waiting for clients...\n");
+    for (int i = 0; i < max_games; i++) {
+                debug("Game State - Client ID: %d, Score: %d, Active: %d\n", 
+                      game_state[i].client_id, game_state[i].score, game_state[i].is_active);
+            }
     
     while (1) {
         if (sigusr1_received) {
+            for (int i = 0; i < max_games; i++) {
+                debug("Game State - Client ID: %d, Score: %d, Active: %d\n", 
+                      game_state[i].client_id, game_state[i].score, game_state[i].is_active);
+            }
             generate_top5_file(game_state, max_games);
             sigusr1_received = 0; // Reset da flag
         }

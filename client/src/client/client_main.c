@@ -31,7 +31,7 @@ static void *receiver_thread(void *arg) {
             if (board.data) {
                 draw_board_client(board);
                 refresh_screen();
-                sleep_ms(2000);
+                sleep_ms(board.tempo);
                 free(board.data);
             }
             pthread_mutex_lock(&mutex);

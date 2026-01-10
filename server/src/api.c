@@ -27,6 +27,10 @@ int create_and_open_reg_fifo(const char *path) {
 
     int reg_fd = open(path, O_RDONLY);
     if (reg_fd < 0) {
+        if (errno == EINTR) {
+            debug("FIFO open interrupted by signal, retrying...\n");
+            return create_and_open_reg_fifo(path);
+        }
         debug("Error opening FIFO for reading: %s\n", strerror(errno));
         return -1;
     }
@@ -42,15 +46,15 @@ int create_and_open_reg_fifo(const char *path) {
 int read_connect_request(int req_fd, connect_request_t *request) {
     char op;
     if (read(req_fd, &op, 1)<0){
-        debug("Error reading from FIFO: %s\n", strerror(errno));
+        if (errno != EINTR) debug("Error reading from FIFO: %s\n", strerror(errno));
         return -1;
     }
     if (read(req_fd, &request->rep_pipe, MAX_PIPE_PATH_LENGTH)<0){
-        debug("Error reading from FIFO: %s\n", strerror(errno));
+        if (errno != EINTR) debug("Error reading from FIFO: %s\n", strerror(errno));
         return -1;
     }
     if (read(req_fd, &request->notif_pipe, MAX_PIPE_PATH_LENGTH)<0){
-        debug("Error reading from FIFO: %s\n", strerror(errno));
+        if (errno != EINTR) debug("Error reading from FIFO: %s\n", strerror(errno));
         return -1;
     }
     if (op != OP_CODE_CONNECT) {
