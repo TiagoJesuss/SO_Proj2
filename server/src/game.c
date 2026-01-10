@@ -22,6 +22,13 @@
 #define LOAD_BACKUP 3
 #define CREATE_BACKUP 4
 
+volatile sig_atomic_t sigusr1_received = 0;
+
+void handle_sigusr1(int signo) {
+    (void)signo; // Ignorar warning de unused parameter
+    sigusr1_received = 1;
+}
+
 Board process_board_to_api(board_t* game_board, int victory, int game_over) {
     Board board_data;
     board_data.width = game_board->width;
@@ -139,6 +146,9 @@ void *pacman_thread(void *arg) {
         }
 
         int move = move_pacman(game_board, 0, play);
+        if (args->game_state != NULL) {
+            args->game_state->score = pacman->points;
+        }
 
         if (move == REACHED_PORTAL) {
             pthread_rwlock_wrlock(lock);
@@ -395,12 +405,13 @@ int read_dir(char *argv, level_info *level_info) {
     return x;
 }
 
-void pacman_thread_args_init(pacman_thread_args_t *args, board_t *game_board, int *result, int *leave_thread, pthread_rwlock_t *lock, int req_pipe_fd) {
+void pacman_thread_args_init(pacman_thread_args_t *args, board_t *game_board, int *result, int *leave_thread, pthread_rwlock_t *lock, int req_pipe_fd, game_state_t *game_state) {
     args->game_board = game_board;
     args->result = result;
     args->leave_thread = leave_thread;
     args->lock = lock;
     args->req_pipe_fd = req_pipe_fd;
+    args->game_state = game_state;
 }
 
 void ghost_thread_args_init(ghost_thread_args_t *args, board_t *game_board, int ghost_index, int *leave_thread) {
@@ -410,13 +421,13 @@ void ghost_thread_args_init(ghost_thread_args_t *args, board_t *game_board, int 
 }
 
 connect_request_t queue_pop(Queue *head) {
-    if (head == NULL) {
+    if (head == NULL || head->next == NULL) {
         connect_request_t empty_request = {0};
         return empty_request; // Fila vazia
     }
     Queue *first_node = head->next;
-    connect_request_t request = head->request;
-    head = first_node;
+    connect_request_t request = first_node->request;
+    head->next = first_node->next;
     free(first_node);
     return request;
 }
@@ -425,13 +436,16 @@ void *worker_thread(void *arg) {
     worker_thread_args_t *args = (worker_thread_args_t *)arg;
     level_info *level_info = args->level_info;
     int n_levels = args->n_levels;
-    //int client_req_fd = args->client_req_fd;
-    //int client_notif_fd = args->client_notif_fd;
-    //int *clients = args->clients;
     int thread_id = args->thread_id;
     Queue *queue = args->queue;
     sem_t *sem_items = args->sem_items;
     pthread_mutex_t *mutex_queue = args->mutex_queue;
+    args->game_state->client_id = thread_id;
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    int s = pthread_sigmask(SIG_BLOCK, &set, NULL);
+    if (s != 0) debug("Erro ao mascarar SIGUSR1 na worker thread\n");
 
     while (true) {
         int client_req_fd = -1;
@@ -460,7 +474,9 @@ void *worker_thread(void *arg) {
         pthread_rwlock_t l = PTHREAD_RWLOCK_INITIALIZER;
 
         pacman_thread_args_t pacman_args;
-        pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l, client_req_fd);
+        args->game_state->is_active = 1;
+        args->game_state->score = 0;
+        pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l, client_req_fd, args->game_state);
         pthread_t pacman_tid;
 
         screen_thread_args_t screen_thread_args;
@@ -531,24 +547,20 @@ void *worker_thread(void *arg) {
             }
             unload_level(&game_board);
         }
+        args->game_state->is_active = 0;
         close(client_req_fd);
         close(client_notif_fd);
-        //(*clients)--;
     }
 
     return NULL;
 }
 
 void queue_push(Queue *head, connect_request_t request) {
+    if (head == NULL) return;
+
     Queue *new_node = (Queue *)malloc(sizeof(Queue));
     new_node->request = request;
     new_node->next = NULL;
-
-    if (head == NULL || (head->request.op_code == 0 && head->request.rep_pipe[0] == '\0' && head->request.notif_pipe[0] == '\0')) {
-        *head = *new_node;
-        free(new_node);
-        return;
-    }
 
     Queue *current = head;
     while (current->next != NULL) {
@@ -556,6 +568,46 @@ void queue_push(Queue *head, connect_request_t request) {
     }
     current->next = new_node;
 }
+
+int compare_scores(const void *a, const void *b) {
+    game_state_t *gameA = (game_state_t *)a;
+    game_state_t *gameB = (game_state_t *)b;
+    return gameB->score - gameA->score;
+}
+
+void generate_top5_file(game_state_t *games, int max_games) {
+    // Criar uma cópia temporária apenas dos jogos ativos para ordenar
+    game_state_t *temp_games = malloc(sizeof(game_state_t) * max_games);
+    if (!temp_games) return;
+
+    int active_count = 0;
+    for (int i = 0; i < max_games; i++) {
+        if (games[i].is_active) {
+            temp_games[active_count] = games[i];
+            active_count++;
+        }
+    }
+
+    // Ordenar por pontuação
+    qsort(temp_games, active_count, sizeof(game_state_t), compare_scores);
+
+    // Escrever no ficheiro
+    int fd = open("top5.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        char buffer[128];
+        int limit = active_count < 5 ? active_count : 5;
+        
+        for (int i = 0; i < limit; i++) {
+            int len = sprintf(buffer, "Client ID: %d, Score: %d\n", 
+                            temp_games[i].client_id, temp_games[i].score);
+            write(fd, buffer, len);
+        }
+        close(fd);
+    }
+    
+    free(temp_games);
+}
+
 
 int main(int argc, char** argv) {
     if (argc != 4) {
@@ -582,32 +634,33 @@ int main(int argc, char** argv) {
         close_debug_file();
         return EXIT_FAILURE;
     }
-    /*
-    if (signal(SIGUSR1, handler)==){
-        x = 1;
-        int logFd = open("topFiveClients.txt", O_WRONLY | O_CREAT, 0644);
-        getTopFive;
-        write(logFd, );
-        close(logFd);
+
+    struct sigaction sa;
+    sa.sa_handler = handle_sigusr1;
+    sa.sa_flags = 0; // Importante para o read ser interrompido
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("sigaction");
+        return EXIT_FAILURE;
     }
-    */
 
     Queue *head = (Queue*)malloc(sizeof(Queue));
     head->request = (connect_request_t){0};
     head->next = NULL;
 
-    //int clients = 0;
+    game_state_t *game_state = calloc(max_games, sizeof(game_state_t));
+
     pthread_t worker_tid;
     for (int i = 0; i<max_games; i++){
         debug("Creating worker thread %d\n", i);
         worker_thread_args_t worker_args;
         worker_args.level_info = level_info;
         worker_args.n_levels = n_levels;
-        //worker_args.clients = &clients;
         worker_args.thread_id = i;
         worker_args.queue = head;
         worker_args.sem_items = &sem_items;
         worker_args.mutex_queue = &mutex_queue;
+        worker_args.game_state = &game_state[i];
         if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
             perror("pthread_create");
             continue;
@@ -616,8 +669,15 @@ int main(int argc, char** argv) {
     debug("Server is running and waiting for clients...\n");
     
     while (1) {
+        if (sigusr1_received) {
+            generate_top5_file(game_state, max_games);
+            sigusr1_received = 0; // Reset da flag
+        }
         connect_request_t request;
         if (read_connect_request(reg_pipe_fd, &request) < 0) {
+            if (errno == EINTR) {
+                continue; // Foi interrompido pelo sinal, volta ao início para verificar a flag
+            }
             debug("Error reading connect request\n");
             continue;
         }
@@ -628,33 +688,6 @@ int main(int argc, char** argv) {
         pthread_mutex_unlock(&mutex_queue);
         sem_post(&sem_items);
         debug("Client added to the queue\n");
-        /*
-        if (open_client_pipes(request.rep_pipe, request.notif_pipe, &client_req_fd, &client_notif_fd, (max_games - clients)) < 0) {
-            debug("Error opening client pipes\n");
-            close(reg_pipe_fd);
-            continue;
-        }
-        if (clients >= max_games) {
-            debug("Max clients reached, rejecting new client\n");
-            close(client_req_fd);
-            close(client_notif_fd);
-            continue;
-        }
-        worker_thread_args_t worker_args;
-        worker_args.level_info = level_info;
-        worker_args.n_levels = n_levels;
-        worker_args.client_req_fd = client_req_fd;
-        worker_args.client_notif_fd = client_notif_fd;
-        worker_args.clients = &clients;
-        pthread_t worker_tid;
-        if (pthread_create(&worker_tid, NULL, worker_thread, &worker_args) != 0) {
-            perror("pthread_create");
-            close(client_req_fd);
-            close(client_notif_fd);
-            continue;
-        }
-        clients++;
-        */
     }
     close(reg_pipe_fd);
     close_debug_file();

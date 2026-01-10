@@ -18,11 +18,18 @@ typedef struct {
 } ghost_thread_args_t;
 
 typedef struct {
+    int score;
+    int client_id;  
+    int is_active;  
+} game_state_t;
+
+typedef struct {
     board_t *game_board;
     int *result;
     int *leave_thread;
     pthread_rwlock_t *lock;
     int req_pipe_fd;
+    game_state_t *game_state;
 } pacman_thread_args_t;
 
 typedef struct {
@@ -46,6 +53,7 @@ typedef struct {
     Queue *queue;
     sem_t *sem_items;
     pthread_mutex_t *mutex_queue;
+    game_state_t *game_state;
 } worker_thread_args_t;
 
 
