@@ -23,10 +23,16 @@
 #define CREATE_BACKUP 4
 
 volatile sig_atomic_t sigusr1_received = 0;
+volatile sig_atomic_t sigint_received = 0;
 
 void handle_sigusr1(int signo) {
     (void)signo; // Ignorar warning de unused parameter
     sigusr1_received = 1;
+}
+
+void handle_sigint(int signo) {
+    (void)signo;
+    sigint_received = 1;
 }
 
 Board process_board_to_api(board_t* game_board, int victory, int game_over) {
@@ -43,6 +49,7 @@ Board process_board_to_api(board_t* game_board, int victory, int game_over) {
     for (int i = 0; i < game_board->height; i++) {
         for (int j = 0; j < game_board->width; j++) {
             int index = i * game_board->width + j;
+            pthread_rwlock_rdlock(&game_board->board[index].lock);
             board_pos_t *pos = &game_board->board[index];
             char ch = pos->content;
             if (ch == ' ') {
@@ -57,6 +64,7 @@ Board process_board_to_api(board_t* game_board, int victory, int game_over) {
             if (ch == 'P') ch = 'C';
             if (ch == 'G') ch = 'M';
             board_data.data[index] = ch;
+            pthread_rwlock_unlock(&game_board->board[index].lock);
         }
     }
     board_data.data[data_size] = '\0'; 
@@ -79,8 +87,10 @@ void *screen_thread(void *arg) {
         Board board_data = process_board_to_api(game_board, *victory, *game_over);
         if (writeBoardChanges(notif_fd, board_data) < 0) {
             debug("Error writing to notification pipe: %s\n", strerror(errno));
+            free(board_data.data);
             break;
         }
+        free(board_data.data);
         sleep_ms(tempo);
     }
     return NULL; 
@@ -531,7 +541,7 @@ void *worker_thread(void *arg) {
                     sleep_ms(game_board.tempo);
                     break;
                 }
-                if(result == QUIT_GAME) {
+                if(result == QUIT_GAME || sigint_received) {
                     sleep_ms(game_board.tempo);
                     end_game = 1;
 
@@ -581,17 +591,24 @@ void generate_top5_file(game_state_t *games, int max_games) {
 
     int active_count = 0;
     for (int i = 0; i < max_games; i++) {
+        pthread_rwlock_rdlock(&games[i].lock);
         if (games[i].is_active) {
             temp_games[active_count] = games[i];
             active_count++;
         }
+        pthread_rwlock_unlock(&games[i].lock);
     }
-
+    int fd = open("top5.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (active_count == 0) {
+        write(fd, "No active games.\n", 17);
+        close(fd);
+        free(temp_games);
+        return;
+    }
     // Ordenar por pontuação
     qsort(temp_games, active_count, sizeof(game_state_t), compare_scores);
 
     // Escrever no ficheiro
-    int fd = open("top5.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
         char buffer[128];
         int limit = active_count < 5 ? active_count : 5;
@@ -623,6 +640,12 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    sa.sa_handler = handle_sigint;
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction SIGINT");
+        return EXIT_FAILURE;
+    }
+
     open_debug_file("debug.log");
     level_info level_info[MAX_LEVELS];
     int n_levels = read_dir(argv[1], level_info);
@@ -637,18 +660,37 @@ int main(int argc, char** argv) {
     sem_init(&sem_items, 0, 0);
     pthread_mutex_init(&mutex_queue, NULL);
 
+    game_state_t *game_state = calloc(max_games, sizeof(game_state_t));
+    for (int i = 0; i < max_games; i++) {
+        pthread_rwlock_init(&game_state[i].lock, NULL);
+    }
 
-    int reg_pipe_fd = create_and_open_reg_fifo(register_fifo_path);
-    if (reg_pipe_fd < 0) {
-        close_debug_file();
-        return EXIT_FAILURE;
+    int reg_pipe_fd;
+    while(1) {
+        reg_pipe_fd = create_and_open_reg_fifo(register_fifo_path);
+        if (reg_pipe_fd < 0) {
+            if (errno == EINTR) {
+                if (sigint_received) {
+                    unlink(register_fifo_path);
+                    close_debug_file();
+                    return EXIT_SUCCESS;
+                } else if (sigusr1_received) {
+                    generate_top5_file(game_state, max_games);
+                    sigusr1_received = 0; // Reset da flag
+                }
+                continue;
+            }
+            close_debug_file();
+            return EXIT_FAILURE;
+        }
+        break;
     }
 
     Queue *head = (Queue*)malloc(sizeof(Queue));
     head->request = (connect_request_t){0};
     head->next = NULL;
 
-    game_state_t *game_state = calloc(max_games, sizeof(game_state_t));
+    
 
     pthread_t worker_tid;
     for (int i = 0; i<max_games; i++){
@@ -668,20 +710,18 @@ int main(int argc, char** argv) {
         }
     }
     debug("Server is running and waiting for clients...\n");
-    for (int i = 0; i < max_games; i++) {
-                debug("Game State - Client ID: %d, Score: %d, Active: %d\n", 
-                      game_state[i].client_id, game_state[i].score, game_state[i].is_active);
-            }
-    
+
     while (1) {
+        if (sigint_received) {
+            debug("SIGINT received, shutting down server...\n");
+            break;
+        }
+
         if (sigusr1_received) {
-            for (int i = 0; i < max_games; i++) {
-                debug("Game State - Client ID: %d, Score: %d, Active: %d\n", 
-                      game_state[i].client_id, game_state[i].score, game_state[i].is_active);
-            }
             generate_top5_file(game_state, max_games);
             sigusr1_received = 0; // Reset da flag
         }
+        
         connect_request_t request;
         if (read_connect_request(reg_pipe_fd, &request) < 0) {
             if (errno == EINTR) {

@@ -26,8 +26,14 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   
   mkfifo(req_pipe_path, 0666);
   mkfifo(notif_pipe_path, 0666);
-  strcpy(session.req_pipe_path, req_pipe_path);
-  strcpy(session.notif_pipe_path, notif_pipe_path);
+  //strcpy(session.req_pipe_path, req_pipe_path);
+  //strcpy(session.notif_pipe_path, notif_pipe_path);
+
+  memset(session.req_pipe_path, 0, MAX_PIPE_PATH_LENGTH); 
+  strncpy(session.req_pipe_path, req_pipe_path, MAX_PIPE_PATH_LENGTH - 1);
+
+  memset(session.notif_pipe_path, 0, MAX_PIPE_PATH_LENGTH); 
+  strncpy(session.notif_pipe_path, notif_pipe_path, MAX_PIPE_PATH_LENGTH - 1);
   
 
   int serverFd = open(server_pipe_path, O_WRONLY);
@@ -67,8 +73,15 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
 }
 
 void pacman_play(char command) {
-  char op =  OP_CODE_PLAY;
+  char msg[2];
+  msg[0] = OP_CODE_PLAY;
+  msg[1] = command;
   debug("pacman_play: Command: %c\n", command);
+  if (write(session.req_pipe, msg, 2) < 0) {
+    debug("Error writing to req pipe: %s\n", strerror(errno));
+    return;
+  }
+  /*
   if (write(session.req_pipe, &op, 1) < 0) {
     debug("Error writing to req pipe: %s\n", strerror(errno));
     return;
@@ -80,6 +93,7 @@ void pacman_play(char command) {
   }
   debug("pacman_play: Command sent: %c\n", command);
   // TODO - implement me
+  */
 }
 
 int pacman_disconnect() {

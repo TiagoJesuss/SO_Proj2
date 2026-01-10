@@ -20,7 +20,8 @@ typedef struct {
 typedef struct {
     int score;
     int client_id;  
-    int is_active;  
+    int is_active;
+    pthread_rwlock_t lock;
 } game_state_t;
 
 typedef struct {

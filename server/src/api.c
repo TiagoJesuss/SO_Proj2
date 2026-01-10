@@ -25,22 +25,23 @@ int create_and_open_reg_fifo(const char *path) {
         }
     }
 
-    int reg_fd = open(path, O_RDONLY);
-    if (reg_fd < 0) {
-        if (errno == EINTR) {
-            debug("FIFO open interrupted by signal, retrying...\n");
-            return create_and_open_reg_fifo(path);
-        }
-        debug("Error opening FIFO for reading: %s\n", strerror(errno));
-        return -1;
-    }
-
     int dummy_fd = open(path, O_WRONLY | O_NONBLOCK);
     if (dummy_fd < 0) {
         if (errno != ENXIO) {
             debug("Error opening FIFO for writing: %s\n", strerror(errno));
         }
     }
+
+    int reg_fd = open(path, O_RDONLY);
+    if (reg_fd < 0) {
+        if (errno == EINTR) {
+            return -1;
+        }
+        debug("Error opening FIFO for reading: %s\n", strerror(errno));
+        return -1;
+    }
+
+    
     return reg_fd;
 }
 int read_connect_request(int req_fd, connect_request_t *request) {
@@ -107,20 +108,15 @@ char get_input_non_blocking(int req_pipe_fd) {
     }
 
     if (op == OP_CODE_PLAY) {
-        int retries = 0;
-        while (retries < 1000) {
-            bytes_read = read(req_pipe_fd, &mov, 1);
-            if (bytes_read > 0) {
-                return mov;
-            }
-            if (bytes_read == 0) return '\0';
-            if (errno != EAGAIN && errno != EWOULDBLOCK) return '\0';
-            
-            // Pequena pausa para dar tempo ao dado chegar ao pipe
-            sleep_ms(1); 
-            retries++;
+        // Como o cliente envia (OP_CODE | KEY) num único write atómico, 
+        // o byte do movimento estará disponível imediatamente no buffer do pipe.
+        bytes_read = read(req_pipe_fd, &mov, 1);
+        if (bytes_read > 0) {
+            return mov;
         }
-        debug("Error: Timed out waiting for move after OP_CODE_PLAY\n");
+        // Se falhar ler o movimento (muito improvável com write atómico),
+        // retornamos ignorar para não bloquear, embora isso possa dessincronizar.
+        return '\0'; 
     } else if (op == OP_CODE_DISCONNECT) {
         debug("Client requested disconnect\n");
         return 'Q';
