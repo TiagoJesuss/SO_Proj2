@@ -108,14 +108,10 @@ char get_input_non_blocking(int req_pipe_fd) {
     }
 
     if (op == OP_CODE_PLAY) {
-        // Como o cliente envia (OP_CODE | KEY) num único write atómico, 
-        // o byte do movimento estará disponível imediatamente no buffer do pipe.
         bytes_read = read(req_pipe_fd, &mov, 1);
         if (bytes_read > 0) {
             return mov;
         }
-        // Se falhar ler o movimento (muito improvável com write atómico),
-        // retornamos ignorar para não bloquear, embora isso possa dessincronizar.
         return '\0'; 
     } else if (op == OP_CODE_DISCONNECT) {
         debug("Client requested disconnect\n");

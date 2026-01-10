@@ -26,7 +26,7 @@ volatile sig_atomic_t sigusr1_received = 0;
 volatile sig_atomic_t sigint_received = 0;
 
 void handle_sigusr1(int signo) {
-    (void)signo; // Ignorar warning de unused parameter
+    (void)signo; 
     sigusr1_received = 1;
 }
 
@@ -157,7 +157,9 @@ void *pacman_thread(void *arg) {
 
         int move = move_pacman(game_board, 0, play);
         if (args->game_state != NULL) {
+            pthread_rwlock_wrlock(&args->game_state->lock);
             args->game_state->score = pacman->points;
+            pthread_rwlock_unlock(&args->game_state->lock);
         }
 
         if (move == REACHED_PORTAL) {
@@ -194,6 +196,7 @@ void process_board(board_pos_t *board, char *board_str, int height, int width) {
         for (int j = 0; j < width; j++) {
             int index = i * width + j;
             char ch = board_str[index];
+            pthread_rwlock_init(&board[index].lock, NULL);
             switch (ch) {
                 case 'X': // Wall
                     board[index].content = 'W';
@@ -484,8 +487,10 @@ void *worker_thread(void *arg) {
         pthread_rwlock_t l = PTHREAD_RWLOCK_INITIALIZER;
 
         pacman_thread_args_t pacman_args;
+        pthread_rwlock_wrlock(&args->game_state->lock);
         args->game_state->is_active = 1;
         args->game_state->score = 0;
+        pthread_rwlock_unlock(&args->game_state->lock);
         pacman_thread_args_init(&pacman_args, &game_board, &result, &leave_thread, &l, client_req_fd, args->game_state);
         pthread_t pacman_tid;
 
@@ -556,7 +561,9 @@ void *worker_thread(void *arg) {
             }
             unload_level(&game_board);
         }
+        pthread_rwlock_wrlock(&args->game_state->lock);
         args->game_state->is_active = 0;
+        pthread_rwlock_unlock(&args->game_state->lock);
         close(client_req_fd);
         close(client_notif_fd);
     }
@@ -585,7 +592,6 @@ int compare_scores(const void *a, const void *b) {
 }
 
 void generate_top5_file(game_state_t *games, int max_games) {
-    // Criar uma cópia temporária apenas dos jogos ativos para ordenar
     game_state_t *temp_games = malloc(sizeof(game_state_t) * max_games);
     if (!temp_games) return;
 
@@ -605,10 +611,9 @@ void generate_top5_file(game_state_t *games, int max_games) {
         free(temp_games);
         return;
     }
-    // Ordenar por pontuação
+
     qsort(temp_games, active_count, sizeof(game_state_t), compare_scores);
 
-    // Escrever no ficheiro
     if (fd >= 0) {
         char buffer[128];
         int limit = active_count < 5 ? active_count : 5;
@@ -633,7 +638,7 @@ int main(int argc, char** argv) {
 
     struct sigaction sa;
     sa.sa_handler = handle_sigusr1;
-    sa.sa_flags = 0; // Importante para o read ser interrompido
+    sa.sa_flags = 0; 
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGUSR1, &sa, NULL) == -1) {
         perror("sigaction");
@@ -662,7 +667,10 @@ int main(int argc, char** argv) {
 
     game_state_t *game_state = calloc(max_games, sizeof(game_state_t));
     for (int i = 0; i < max_games; i++) {
-        pthread_rwlock_init(&game_state[i].lock, NULL);
+        if (pthread_rwlock_init(&game_state[i].lock, NULL) != 0) {
+            perror("pthread_rwlock_init");
+            return EXIT_FAILURE;
+        }
     }
 
     int reg_pipe_fd;
@@ -676,7 +684,7 @@ int main(int argc, char** argv) {
                     return EXIT_SUCCESS;
                 } else if (sigusr1_received) {
                     generate_top5_file(game_state, max_games);
-                    sigusr1_received = 0; // Reset da flag
+                    sigusr1_received = 0; 
                 }
                 continue;
             }
@@ -719,13 +727,13 @@ int main(int argc, char** argv) {
 
         if (sigusr1_received) {
             generate_top5_file(game_state, max_games);
-            sigusr1_received = 0; // Reset da flag
+            sigusr1_received = 0; 
         }
         
         connect_request_t request;
         if (read_connect_request(reg_pipe_fd, &request) < 0) {
             if (errno == EINTR) {
-                continue; // Foi interrompido pelo sinal, volta ao início para verificar a flag
+                continue; 
             }
             debug("Error reading connect request\n");
             continue;
@@ -738,6 +746,10 @@ int main(int argc, char** argv) {
         sem_post(&sem_items);
         debug("Client added to the queue\n");
     }
+    for (int i = 0; i < max_games; i++) {
+        pthread_rwlock_destroy(&game_state[i].lock);
+    }
+    free(game_state);
     close(reg_pipe_fd);
     close_debug_file();
 

@@ -26,8 +26,6 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   
   mkfifo(req_pipe_path, 0666);
   mkfifo(notif_pipe_path, 0666);
-  //strcpy(session.req_pipe_path, req_pipe_path);
-  //strcpy(session.notif_pipe_path, notif_pipe_path);
 
   memset(session.req_pipe_path, 0, MAX_PIPE_PATH_LENGTH); 
   strncpy(session.req_pipe_path, req_pipe_path, MAX_PIPE_PATH_LENGTH - 1);
@@ -45,7 +43,6 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   write(serverFd, &op, sizeof(char)); //pode nao conseguir escrever toda a data atencao
   write(serverFd, session.req_pipe_path, MAX_PIPE_PATH_LENGTH);
   write(serverFd, session.notif_pipe_path, MAX_PIPE_PATH_LENGTH);
-  //close(serverFd);
 
   int notFd = open(session.notif_pipe_path, O_RDONLY);
   if (notFd < 0) {
@@ -81,19 +78,6 @@ void pacman_play(char command) {
     debug("Error writing to req pipe: %s\n", strerror(errno));
     return;
   }
-  /*
-  if (write(session.req_pipe, &op, 1) < 0) {
-    debug("Error writing to req pipe: %s\n", strerror(errno));
-    return;
-  }
-  debug("pacman_play: OP CODE sent: %d\n", op);
-  if (write(session.req_pipe, &command, 1) < 0) {
-    debug("Error writing to req pipe: %s\n", strerror(errno));
-    return;
-  }
-  debug("pacman_play: Command sent: %c\n", command);
-  // TODO - implement me
-  */
 }
 
 int pacman_disconnect() {
